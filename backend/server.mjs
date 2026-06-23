@@ -14,7 +14,7 @@ const uploadDir = path.join(rootDir, 'public', 'uploads');
 const dbPath = process.env.DB_PATH || path.join(dataDir, 'db.json');
 
 const PORT = Number(process.env.PORT || 8789);
-const HOST = process.env.HOST || '127.0.0.1';
+const HOST = process.env.HOST || '0.0.0.0';
 const APP_ORIGIN = process.env.APP_ORIGIN || 'http://127.0.0.1:5173';
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || APP_ORIGIN;
 const CORS_ALLOW_HEADERS = [
