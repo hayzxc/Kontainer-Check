@@ -160,7 +160,7 @@ export default function ShipperBatchInspection() {
           </Button>
           {batchInfo.latitude && (
             <p className="text-xs text-muted-foreground">
-              GPS: {batchInfo.latitude.toFixed(6)}, {batchInfo.longitude.toFixed(6)}
+              GPS: {Number(batchInfo.latitude).toFixed(6)}, {Number(batchInfo.longitude).toFixed(6)}
             </p>
           )}
         </div>

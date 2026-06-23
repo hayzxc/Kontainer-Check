@@ -105,7 +105,7 @@ export default function StepContainerData({ data, onChange }) {
           </Button>
           {data.latitude && (
             <p className="text-xs text-muted-foreground">
-              GPS: {data.latitude.toFixed(6)}, {data.longitude.toFixed(6)}
+              GPS: {Number(data.latitude).toFixed(6)}, {Number(data.longitude).toFixed(6)}
             </p>
           )}
         </div>

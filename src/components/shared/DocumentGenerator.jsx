@@ -1,5 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import React, { useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { FileDown, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import jsPDF from 'jspdf';
@@ -7,7 +9,7 @@ import html2canvas from 'html2canvas';
 
 function PhotoCell({ photo, session, alt }) {
   const coordLine = session.latitude && session.longitude
-    ? `${session.latitude.toFixed(6)}, ${session.longitude.toFixed(6)}`
+    ? `${Number(session.latitude).toFixed(6)}, ${Number(session.longitude).toFixed(6)}`
     : '';
   const timestamp = session.updated_date || session.created_date
     ? format(new Date(session.updated_date || session.created_date), 'dd/MM/yyyy HH:mm')
@@ -112,14 +114,10 @@ function DocumentPreview({ sessions = [], photosMap = {} }) {
                   {session.location_name && <div style={{ marginBottom: '4px' }}>{session.location_name}</div>}
                   {session.latitude && session.longitude ? (
                     <div style={{ color: '#6b7280' }}>
-                      {session.latitude.toFixed(5)}, {session.longitude.toFixed(5)}
+                      {Number(session.latitude).toFixed(5)}, {Number(session.longitude).toFixed(5)}
                     </div>
                   ) : (
         <div style={{ color: '#9ca3af' }}>-</div>
-                  )}
-                </td>
-              </tr>
-            );
           })}
         </tbody>
       </table>
