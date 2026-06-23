@@ -26,6 +26,29 @@ export function logout() {
   localStorage.removeItem('token');
 }
 
+function fixUrls(data) {
+  if (typeof data === 'string') {
+    if (data.startsWith('http://127.0.0.1:5173/')) {
+      const origin = BASE_URL || window.location.origin;
+      return data.replace('http://127.0.0.1:5173', origin);
+    }
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data.map(fixUrls);
+  }
+  if (data && typeof data === 'object') {
+    for (const key in data) {
+      if (data[key] && typeof data[key] === 'object') {
+        data[key] = fixUrls(data[key]);
+      } else if (typeof data[key] === 'string' && key.includes('url')) {
+        data[key] = fixUrls(data[key]);
+      }
+    }
+  }
+  return data;
+}
+
 export async function apiFetch(path, options = {}) {
   const token = getToken();
   const headers = new Headers(options.headers || {});
@@ -56,7 +79,8 @@ export async function apiFetch(path, options = {}) {
   }
 
   if (res.status === 204) return null;
-  return res.json();
+  const data = await res.json();
+  return fixUrls(data);
 }
 
 export async function login(email, password) {
