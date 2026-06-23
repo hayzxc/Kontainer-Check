@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import MetricCard from '@/components/dashboard/MetricCard';
 import StatusBadge from '@/components/shared/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
+import DocumentGenerator from '@/components/shared/DocumentGenerator';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -24,6 +25,21 @@ export default function InspectorDashboard() {
 
   // Only show non-archived in active list
   const activeSessions = sessions.filter(s => !s.archived);
+
+  // Fetch all photos for active sessions
+  const { data: allPhotos = [] } = useQuery({
+    queryKey: ['my-active-photos'],
+    queryFn: () => entities.InspectionPhoto.list('-created_date', 500),
+  });
+
+  const photosMap = React.useMemo(() => {
+    const map = {};
+    allPhotos.forEach(p => {
+      if (!map[p.session_id]) map[p.session_id] = [];
+      map[p.session_id].push(p);
+    });
+    return map;
+  }, [allPhotos]);
 
   const pending = activeSessions.filter(s => s.status === 'pending').length;
   const approved = activeSessions.filter(s => s.status === 'approved').length;
@@ -95,15 +111,20 @@ export default function InspectorDashboard() {
 
       {/* Inspections List */}
       <div>
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-lg font-semibold">Inspeksi Aktif</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {!selectMode ? (
               <>
+                <DocumentGenerator
+                  sessions={activeSessions}
+                  photosMap={photosMap}
+                  filename="inspeksi_aktif"
+                />
                 <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setSelectMode(true)}>
                   <CheckSquare className="w-4 h-4" /> Pilih
                 </Button>
-                <Link to="/my-archive" className="text-sm text-primary font-medium flex items-center gap-1 hover:underline">
+                <Link to="/my-archive" className="text-sm text-primary font-medium flex items-center gap-1 hover:underline ml-2">
                   Arsip <ArrowRight className="w-4 h-4" />
                 </Link>
               </>
@@ -113,6 +134,11 @@ export default function InspectorDashboard() {
                   {selected.size === activeSessions.length ? <CheckSquare className="w-4 h-4" /> : <Square className="w-4 h-4" />}
                   Semua
                 </Button>
+                <DocumentGenerator
+                  sessions={activeSessions.filter(s => selected.has(s.id))}
+                  photosMap={photosMap}
+                  filename="inspeksi_terpilih"
+                />
                 <Button
                   size="sm"
                   className="gap-1.5 bg-primary"
