@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { entities } from '@/lib/api';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, MapPin, Calendar, Container, Camera, ScanLine, AlertCircle, User } from 'lucide-react';
@@ -15,9 +15,7 @@ import {
 } from '@/components/ui/dialog';
 
 export default function InspectionDetail() {
-  const urlParams = new URLSearchParams(window.location.search);
-  const pathParts = window.location.pathname.split('/');
-  const sessionId = pathParts[pathParts.length - 1];
+  const { id: sessionId } = useParams();
   const navigate = useNavigate();
 
   const { data: session, isLoading: loadingSession } = useQuery({

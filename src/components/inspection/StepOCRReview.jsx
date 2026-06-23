@@ -7,10 +7,12 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScanLine, CheckCircle2, Edit3, AlertCircle } from 'lucide-react';
+import { useToast } from '@/components/ui/use-toast';
 
 export default function StepOCRReview({ photos, ocrResults, setOcrResults }) {
   const [processing, setProcessing] = useState(false);
   const [processed, setProcessed] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!processed && Object.keys(photos).length > 0 && Object.keys(ocrResults).length === 0) {
@@ -20,47 +22,57 @@ export default function StepOCRReview({ photos, ocrResults, setOcrResults }) {
 
   const runOCR = async () => {
     setProcessing(true);
-    const results = {};
+    try {
+      const results = {};
 
-    // Process each photo through LLM for OCR
-    for (const [angle, photo] of Object.entries(photos)) {
-      const res = await integrations.Core.InvokeLLM({
-        prompt: `Analyze this container photo. Extract:
+      // Process each photo through LLM for OCR
+      for (const [angle, photo] of Object.entries(photos)) {
+        const res = await integrations.Core.InvokeLLM({
+          prompt: `Analyze this container photo. Extract:
 1. Any container serial number visible (ISO 6346 format: 4 letters + 6 digits + 1 check digit, e.g., MSCU1234567)
 2. Any visible damage (rust, dent, crack, hole, scratch)
 Return your analysis.`,
-        file_urls: [photo.url],
-        response_json_schema: {
-          type: "object",
-          properties: {
-            detected_serial: { type: "string", description: "Detected serial number or empty string" },
-            confidence: { type: "number", description: "Confidence score 0.0-1.0" },
-            damages: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  type: { type: "string" },
-                  confidence: { type: "number" }
+          file_urls: [photo.url],
+          response_json_schema: {
+            type: "object",
+            properties: {
+              detected_serial: { type: "string", description: "Detected serial number or empty string" },
+              confidence: { type: "number", description: "Confidence score 0.0-1.0" },
+              damages: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    type: { type: "string" },
+                    confidence: { type: "number" }
+                  }
                 }
               }
             }
           }
-        }
+        });
+
+        results[angle] = {
+          detected_serial: res.detected_serial || '',
+          confirmed_serial: res.detected_serial || '',
+          confidence: res.confidence || 0,
+          damages: res.damages || [],
+          edited: false,
+        };
+      }
+
+      setOcrResults(results);
+      setProcessed(true);
+    } catch (err) {
+      console.error("OCR Error:", err);
+      toast({
+        title: "Proses OCR Gagal",
+        description: "Terjadi kesalahan saat memproses gambar dengan AI.",
+        variant: "destructive",
       });
-
-      results[angle] = {
-        detected_serial: res.detected_serial || '',
-        confirmed_serial: res.detected_serial || '',
-        confidence: res.confidence || 0,
-        damages: res.damages || [],
-        edited: false,
-      };
+    } finally {
+      setProcessing(false);
     }
-
-    setOcrResults(results);
-    setProcessing(false);
-    setProcessed(true);
   };
 
   const handleSerialEdit = (angle, value) => {

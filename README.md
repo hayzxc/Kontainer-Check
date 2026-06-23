@@ -209,4 +209,3 @@ To maintain repository cleanliness, the following files and directories are igno
 - `Memory-bank/` (contains engineering/database model design notes)
 - `.agents/` & `agent/`
 - `vite-dev.log` & `vite-dev.err.log`
-#

@@ -1,5 +1,6 @@
 import http from 'node:http';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
+import * as db from './db.mjs';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,7 +45,7 @@ const PHOTO_EDITABLE_FIELDS = [
   'ocr_processed', 'is_corrected', 'damage_labels',
 ];
 
-let db = null;
+
 
 function now() {
   return new Date().toISOString();
@@ -54,15 +55,20 @@ function id(prefix) {
   return `${prefix}_${crypto.randomUUID()}`;
 }
 
-function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
-  const hash = crypto.pbkdf2Sync(password, salt, 120000, 32, 'sha256').toString('hex');
-  return `${salt}:${hash}`;
+async function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
+  return new Promise((resolve, reject) => {
+    crypto.pbkdf2(password, salt, 120000, 32, 'sha256', (err, derivedKey) => {
+      if (err) reject(err);
+      else resolve(`${salt}:${derivedKey.toString('hex')}`);
+    });
+  });
 }
 
-function verifyPassword(password, stored) {
+async function verifyPassword(password, stored) {
   const [salt] = String(stored || '').split(':');
   if (!salt) return false;
-  const candidate = Buffer.from(hashPassword(password, salt));
+  const candidateStr = await hashPassword(password, salt);
+  const candidate = Buffer.from(candidateStr);
   const expected = Buffer.from(String(stored));
   return candidate.length === expected.length && crypto.timingSafeEqual(candidate, expected);
 }
@@ -73,59 +79,7 @@ function publicUser(user) {
   return safe;
 }
 
-async function loadDb() {
-  await mkdir(dataDir, { recursive: true });
-  await mkdir(uploadDir, { recursive: true });
-  try {
-    db = JSON.parse(await readFile(dbPath, 'utf8'));
-  } catch {
-    db = {
-      users: [],
-      inspection_sessions: [],
-      inspection_photos: [],
-      audit_logs: [],
-      tokens: {},
-    };
-  }
 
-  const seeds = [
-    ['admin@example.com', 'Admin User', 'admin'],
-    ['inspector@example.com', 'Inspector User', 'inspector'],
-    ['auditor@example.com', 'Auditor User', 'auditor'],
-    ['shipper@example.com', 'Shipper User', 'shipper'],
-  ];
-
-  let changed = false;
-  for (const user of db.users) {
-    if (user.is_verified == null) {
-      user.is_verified = Boolean(user.verified);
-      changed = true;
-    }
-  }
-  for (const [email, name, role] of seeds) {
-    if (!db.users.some((user) => user.email === email)) {
-      db.users.push({
-        id: id('usr'),
-        email,
-        name,
-        full_name: name,
-        role,
-        password_hash: hashPassword('password123'),
-        verified: true,
-        is_verified: true,
-        created_date: now(),
-        updated_date: now(),
-      });
-      changed = true;
-    }
-  }
-
-  if (changed) await saveDb();
-}
-
-async function saveDb() {
-  await writeFile(dbPath, JSON.stringify(db, null, 2));
-}
 
 function send(res, status, body, headers = {}) {
   const data = body == null ? '' : JSON.stringify(body);
@@ -211,15 +165,15 @@ async function readJson(req) {
   return JSON.parse(body.toString('utf8'));
 }
 
-function getAuthUser(req) {
+async function getAuthUser(req) {
   const auth = req.headers.authorization || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-  const userId = token ? db.tokens[token] : null;
-  return db.users.find((user) => user.id === userId) || null;
+  if (!token) return null;
+  return db.findUserByToken(token);
 }
 
-function requireUser(req, res) {
-  const user = getAuthUser(req);
+async function requireUser(req, res) {
+  const user = await getAuthUser(req);
   if (!user) {
     error(res, 401, 'Authentication required', 'AUTH_REQUIRED');
     return null;
@@ -246,9 +200,9 @@ function canReadPhoto(user, photo) {
   return hasRole(user, ['admin', 'auditor']) || photo.created_by_id === user?.id;
 }
 
-function canUpdatePhoto(user, photo) {
+async function canUpdatePhoto(user, photo) {
   if (hasRole(user, ['admin'])) return true;
-  const session = db.inspection_sessions.find((row) => row.id === photo.session_id);
+  const session = await db.findInspectionSession(photo.session_id);
   return photo.created_by_id === user?.id && Boolean(session) && canUpdateSession(user, session);
 }
 
@@ -260,8 +214,13 @@ function tableForEntity(entityName) {
   return ENTITY_TABLES[entityName];
 }
 
-function tableRows(table, user) {
-  const rows = db[table] || [];
+async function getTableRows(table, user) {
+  let rows = [];
+  if (table === 'inspection_sessions') rows = await db.listInspectionSessions();
+  else if (table === 'inspection_photos') rows = await db.listInspectionPhotos();
+  else if (table === 'audit_logs') rows = await db.listAuditLogs();
+  else if (table === 'users') rows = await db.listUsers();
+
   if (table === 'inspection_sessions') return rows.filter((row) => canReadSession(user, row));
   if (table === 'inspection_photos') return rows.filter((row) => canReadPhoto(user, row));
   if (table === 'audit_logs') return canReadAudit(user) ? rows : [];
@@ -300,7 +259,7 @@ function applyListParams(rows, url) {
 
 async function audit(action, entityType, entityId, user, details = '') {
   if (!AUDIT_ACTIONS.includes(action)) return;
-  db.audit_logs.push({
+  await db.insertAuditLog({
     id: id('log'),
     action,
     entity_type: entityType,
@@ -361,9 +320,9 @@ function createSession(data, user) {
   };
 }
 
-function createPhoto(data, user) {
+async function createPhoto(data, user) {
   validatePhoto(data);
-  const session = db.inspection_sessions.find((row) => row.id === data.session_id);
+  const session = await db.findInspectionSession(data.session_id);
   if (!session) throw new Error('Session not found');
   if (!canUpdateSession(user, session)) throw new Error('Session cannot be changed');
   return {
@@ -460,7 +419,7 @@ function parseMultipart(buffer, contentType) {
 }
 
 async function handleUpload(req, res) {
-  const user = requireUser(req, res);
+  const user = await requireUser(req, res);
   if (!user) return;
   const body = await readBody(req);
   const fields = parseMultipart(body, req.headers['content-type']);
@@ -470,7 +429,6 @@ async function handleUpload(req, res) {
   const filename = `${Date.now()}-${crypto.randomUUID()}${ext}`;
   await writeFile(path.join(uploadDir, filename), file.buffer);
   await audit('upload', 'photo', filename, user, `Uploaded ${file.filename}`);
-  await saveDb();
   send(res, 201, { file_url: `${PUBLIC_BASE_URL}/uploads/${filename}` });
 }
 
@@ -485,7 +443,8 @@ async function handleAuth(req, res, method, segments) {
   if (method === 'POST' && action === 'register') {
     const body = await readJson(req);
     if (!body.email || !body.password) return error(res, 400, 'email and password are required');
-    if (db.users.some((user) => user.email.toLowerCase() === body.email.toLowerCase())) {
+    if (body.password.length < 8) return error(res, 400, 'Password must be at least 8 characters long');
+    if (await db.findUserByEmail(body.email)) {
       return error(res, 409, 'Email already registered', 'EMAIL_EXISTS');
     }
     const user = {
@@ -494,19 +453,17 @@ async function handleAuth(req, res, method, segments) {
       name: body.name || body.full_name || body.email,
       full_name: body.full_name || body.name || body.email,
       role: body.role && ['inspector', 'shipper'].includes(body.role) ? body.role : 'inspector',
-      password_hash: hashPassword(body.password),
+      password_hash: await hashPassword(body.password),
       verified: false,
       is_verified: false,
       created_date: now(),
       updated_date: now(),
     };
-    db.users.push(user);
+    await db.insertUser(user);
     try {
       await sendVerificationOtp(user.email);
-      await saveDb();
       return send(res, 201, { message: 'Verification code sent' });
     } catch (err) {
-      await saveDb();
       console.error('Verification email delivery failed:', err.message);
       return error(res, 503, 'Verification email could not be sent. Please try again later.');
     }
@@ -514,15 +471,12 @@ async function handleAuth(req, res, method, segments) {
 
   if (method === 'POST' && action === 'verify-otp') {
     const body = await readJson(req);
-    const user = db.users.find((row) => row.email === String(body.email || '').toLowerCase());
+    const user = await db.findUserByEmail(body.email);
     if (!user) return error(res, 400, 'Invalid or expired verification code');
     try {
       await verifyEmailOtp(user.email, body.otp_code);
-      user.verified = true;
-      user.is_verified = true;
-      user.updated_date = now();
+      await db.updateUser(user.id, { verified: true, is_verified: true, updated_date: now() });
       await audit('verify', 'user', user.id, user, 'Verified email address');
-      await saveDb();
       return send(res, 200, { message: 'Email verified successfully' });
     } catch (err) {
       return error(res, 400, err.message === 'OTP expired' ? 'Verification code has expired. Request a new code.' : 'Invalid or expired verification code');
@@ -531,12 +485,10 @@ async function handleAuth(req, res, method, segments) {
 
   if (method === 'POST' && action === 'resend-otp') {
     const body = await readJson(req);
-    const user = db.users.find((row) => row.email === String(body.email || '').toLowerCase());
+    const user = await db.findUserByEmail(body.email);
     if (!user || user.is_verified || user.verified) return send(res, 200, { message: 'If an unverified account exists, a verification code has been sent.' });
     try {
       await resendVerificationOtp(user.email);
-      user.updated_date = now();
-      await saveDb();
       return send(res, 200, { message: 'Verification code sent' });
     } catch (err) {
       console.error('Verification email resend failed:', err.message);
@@ -547,32 +499,35 @@ async function handleAuth(req, res, method, segments) {
 
   if (method === 'POST' && action === 'login') {
     const body = await readJson(req);
-    const user = db.users.find((row) => row.email === String(body.email || '').toLowerCase());
-    if (!user || !verifyPassword(body.password || '', user.password_hash)) return error(res, 401, 'Invalid email or password');
+    const user = await db.findUserByEmail(body.email);
+    if (!user || !(await verifyPassword(body.password || '', user.password_hash))) return error(res, 401, 'Invalid email or password');
     if (!user.is_verified && !user.verified) return send(res, 403, { message: 'Email is not verified', needsVerification: true });
     const token = crypto.randomBytes(32).toString('hex');
-    db.tokens[token] = user.id;
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    await db.insertToken(token, user.id, expiresAt);
     await audit('login', 'user', user.id, user, 'Logged in');
-    await saveDb();
     return send(res, 200, { access_token: token, user: publicUser(user) });
   }
 
   if (method === 'POST' && action === 'reset-password-request') {
     const body = await readJson(req);
-    const user = db.users.find((row) => row.email === String(body.email || '').toLowerCase());
-    if (user) user.reset_token = 'dev-reset-token';
-    await saveDb();
-    return send(res, 200, { message: 'Reset link sent', dev_reset_token: 'dev-reset-token' });
+    const user = await db.findUserByEmail(body.email);
+    const resetToken = crypto.randomBytes(20).toString('hex');
+    if (user) {
+      await db.updateUser(user.id, { reset_token: resetToken });
+    }
+    return send(res, 200, { message: 'Reset link sent', dev_reset_token: resetToken });
   }
 
   if (method === 'POST' && action === 'reset-password') {
     const body = await readJson(req);
-    const user = db.users.find((row) => row.reset_token === body.reset_token);
+    const user = await db.findUserByResetToken(body.reset_token);
     if (!user) return error(res, 400, 'Invalid reset token');
-    user.password_hash = hashPassword(body.new_password);
-    user.reset_token = null;
-    user.updated_date = now();
-    await saveDb();
+    await db.updateUser(user.id, {
+      password_hash: await hashPassword(body.new_password),
+      reset_token: null,
+      updated_date: now(),
+    });
     return send(res, 200, { message: 'Password updated' });
   }
 
@@ -580,7 +535,7 @@ async function handleAuth(req, res, method, segments) {
 }
 
 async function handleEntity(req, res, method, url, segments) {
-  const user = requireUser(req, res);
+  const user = await requireUser(req, res);
   if (!user) return;
 
   const entityName = segments[4];
@@ -591,17 +546,20 @@ async function handleEntity(req, res, method, url, segments) {
     if (method === 'GET') return send(res, 200, publicUser(user));
     if (method === 'PUT') {
       const body = await readJson(req);
-      Object.assign(user, { name: body.name ?? user.name, full_name: body.full_name ?? user.full_name, updated_date: now() });
-      await saveDb();
-      return send(res, 200, publicUser(user));
+      const updated = await db.updateUser(user.id, { name: body.name ?? user.name, full_name: body.full_name ?? user.full_name, updated_date: now() });
+      return send(res, 200, publicUser(updated || user));
     }
   }
 
   const entityId = segments[5];
-  if (method === 'GET' && !entityId) return send(res, 200, applyListParams(tableRows(table, user), url));
+  if (method === 'GET' && !entityId) {
+    const rows = await getTableRows(table, user);
+    return send(res, 200, applyListParams(rows, url));
+  }
 
   if (method === 'GET' && entityId) {
-    const row = tableRows(table, user).find((item) => item.id === entityId);
+    const rows = await getTableRows(table, user);
+    const row = rows.find((item) => item.id === entityId);
     return row ? send(res, 200, row) : error(res, 404, 'Entity not found');
   }
 
@@ -610,22 +568,16 @@ async function handleEntity(req, res, method, url, segments) {
     try {
       let row;
       if (table === 'inspection_sessions') {
-        row = createSession(body, user);
-        db[table].push(row);
+        row = await db.insertInspectionSession(createSession(body, user));
         await audit('create', 'inspection_session', row.id, user, `Created inspection ${row.container_id}`);
       } else if (table === 'inspection_photos') {
-        row = createPhoto(body, user);
-        db[table].push(row);
-        const session = db.inspection_sessions.find((item) => item.id === row.session_id);
-        if (session) {
-          session.photo_count = db.inspection_photos.filter((photo) => photo.session_id === session.id).length;
-          session.updated_date = now();
-        }
+        row = await db.insertInspectionPhoto(await createPhoto(body, user));
+        const count = await db.countPhotosBySession(row.session_id);
+        await db.updateInspectionSession(row.session_id, { photo_count: count, updated_date: now() });
         await audit('upload', 'photo', row.id, user, `Uploaded ${row.photo_angle} photo`);
       } else {
         return error(res, 403, 'This entity is server-managed');
       }
-      await saveDb();
       return send(res, 201, row);
     } catch (err) {
       return error(res, 400, err.message);
@@ -633,33 +585,47 @@ async function handleEntity(req, res, method, url, segments) {
   }
 
   if ((method === 'PUT' || method === 'PATCH') && entityId) {
-    const row = db[table].find((item) => item.id === entityId);
+    let row;
+    if (table === 'inspection_sessions') row = await db.findInspectionSession(entityId);
+    else if (table === 'inspection_photos') row = await db.findInspectionPhoto(entityId);
+    else if (table === 'users') row = await db.findUserById(entityId);
+    
     if (!row) return error(res, 404, 'Entity not found');
     if (table === 'users' || table === 'audit_logs') return error(res, 403, 'This entity is server-managed');
-    if (table === 'inspection_photos' && !canUpdatePhoto(user, row)) return error(res, 403, 'Not allowed to update this photo');
+    if (table === 'inspection_photos' && !(await canUpdatePhoto(user, row))) return error(res, 403, 'Not allowed to update this photo');
+    
     const body = await readJson(req);
     try {
       const updates = table === 'inspection_sessions'
         ? sessionUpdates(body, user, row)
         : photoUpdates(body);
-      Object.assign(row, updates, { updated_date: now() });
-      await audit('update', table === 'inspection_sessions' ? 'inspection_session' : 'photo', row.id, user, 'Updated entity');
-      await saveDb();
-      return send(res, 200, row);
+      updates.updated_date = now();
+      
+      let updatedRow;
+      if (table === 'inspection_sessions') updatedRow = await db.updateInspectionSession(entityId, updates);
+      else updatedRow = await db.updateInspectionPhoto(entityId, updates);
+      
+      await audit('update', table === 'inspection_sessions' ? 'inspection_session' : 'photo', entityId, user, 'Updated entity');
+      return send(res, 200, updatedRow);
     } catch (err) {
       return error(res, /^Not allowed/.test(err.message) ? 403 : 400, err.message);
     }
   }
 
   if (method === 'DELETE' && entityId) {
-    const row = db[table].find((item) => item.id === entityId);
+    let row;
+    if (table === 'inspection_sessions') row = await db.findInspectionSession(entityId);
+    else if (table === 'inspection_photos') row = await db.findInspectionPhoto(entityId);
+    
     if (!row) return error(res, 404, 'Entity not found');
     if (table === 'users' || table === 'audit_logs') return error(res, 403, 'This entity is server-managed');
     if (table === 'inspection_sessions' && !hasRole(user, ['admin'])) return error(res, 403, 'Admin only');
-    if (table === 'inspection_photos' && !canUpdatePhoto(user, row)) return error(res, 403, 'Not allowed');
-    db[table] = db[table].filter((item) => item.id !== entityId);
+    if (table === 'inspection_photos' && !(await canUpdatePhoto(user, row))) return error(res, 403, 'Not allowed');
+    
+    if (table === 'inspection_sessions') await db.deleteInspectionSession(entityId);
+    else await db.deleteInspectionPhoto(entityId);
+    
     await audit('delete', table, entityId, user, 'Deleted entity');
-    await saveDb();
     return send(res, 200, { success: true });
   }
 
@@ -667,37 +633,36 @@ async function handleEntity(req, res, method, url, segments) {
 }
 
 async function handleRestApi(req, res, method, url, segments) {
-  const user = requireUser(req, res);
+  const user = await requireUser(req, res);
   if (!user) return;
 
   if (segments[1] === 'inspection-sessions') {
     const sessionId = segments[2];
     const action = segments[3];
 
-    if (method === 'GET' && !sessionId) return send(res, 200, applyListParams(tableRows('inspection_sessions', user), url));
+    if (method === 'GET' && !sessionId) return send(res, 200, applyListParams(await getTableRows('inspection_sessions', user), url));
     if (method === 'POST' && !sessionId) {
       try {
-        const row = createSession(await readJson(req), user);
-        db.inspection_sessions.push(row);
+        const row = await db.insertInspectionSession(createSession(await readJson(req), user));
         await audit('create', 'inspection_session', row.id, user, `Created inspection ${row.container_id}`);
-        await saveDb();
         return send(res, 201, row);
       } catch (err) {
         return error(res, /^Not allowed/.test(err.message) ? 403 : 400, err.message);
       }
     }
 
-    const session = db.inspection_sessions.find((row) => row.id === sessionId);
+    const session = await db.findInspectionSession(sessionId);
     if (!session || !canReadSession(user, session)) return error(res, 404, 'Session not found');
 
     if (method === 'GET' && !action) return send(res, 200, session);
     if (method === 'PATCH' && !action) {
       const body = await readJson(req);
       try {
-        Object.assign(session, sessionUpdates(body, user, session), { updated_date: now() });
+        const updates = sessionUpdates(body, user, session);
+        updates.updated_date = now();
+        const updatedRow = await db.updateInspectionSession(session.id, updates);
         await audit('update', 'inspection_session', session.id, user, 'Updated inspection');
-        await saveDb();
-        return send(res, 200, session);
+        return send(res, 200, updatedRow);
       } catch (err) {
         return error(res, 400, err.message);
       }
@@ -705,11 +670,12 @@ async function handleRestApi(req, res, method, url, segments) {
     if (method === 'POST' && action === 'submit') {
       if (session.created_by_id !== user.id) return error(res, 403, 'Only the owner can submit');
       if (!['draft', 'clarification'].includes(session.status)) return error(res, 409, 'Only draft or clarification sessions can be submitted');
-      session.status = 'pending';
-      session.updated_date = now();
+      const updatedRow = await db.updateInspectionSession(session.id, {
+        status: 'pending',
+        updated_date: now(),
+      });
       await audit('submit', 'inspection_session', session.id, user, `Submitted inspection ${session.container_id}`);
-      await saveDb();
-      return send(res, 200, session);
+      return send(res, 200, updatedRow);
     }
     if (method === 'POST' && action === 'verify') {
       if (!hasRole(user, ['admin'])) return error(res, 403, 'Admin only');
@@ -717,14 +683,16 @@ async function handleRestApi(req, res, method, url, segments) {
       const body = await readJson(req);
       const status = { approve: 'approved', reject: 'rejected', clarify: 'clarification' }[body.decision];
       if (!status) return error(res, 400, 'decision must be approve, reject, or clarify');
-      session.status = status;
-      session.admin_comment = body.admin_comment || '';
-      session.verified_by_name = user.full_name || user.name || user.email;
-      session.verified_at = now();
-      session.updated_date = now();
+      
+      const updatedRow = await db.updateInspectionSession(session.id, {
+        status,
+        admin_comment: body.admin_comment || '',
+        verified_by_name: user.full_name || user.name || user.email,
+        verified_at: now(),
+        updated_date: now(),
+      });
       await audit('verify', 'inspection_session', session.id, user, `Decision: ${body.decision}`);
-      await saveDb();
-      return send(res, 200, session);
+      return send(res, 200, updatedRow);
     }
     if (method === 'POST' && action === 'photos') {
       return handleUpload(req, res);
@@ -732,32 +700,31 @@ async function handleRestApi(req, res, method, url, segments) {
   }
 
   if (segments[1] === 'photos' && segments[2]) {
-    const photo = db.inspection_photos.find((row) => row.id === segments[2]);
+    const photo = await db.findInspectionPhoto(segments[2]);
     if (!photo || !canReadPhoto(user, photo)) return error(res, 404, 'Photo not found');
     if (method === 'GET') return send(res, 200, photo);
     if (method === 'POST' && segments[3] === 'ocr') {
       const body = await readJson(req);
-      if (!canUpdatePhoto(user, photo)) return error(res, 403, 'Not allowed');
+      if (!(await canUpdatePhoto(user, photo))) return error(res, 403, 'Not allowed');
+      
+      const updates = { updated_date: now() };
       if (body.action === 'rerun') {
-        photo.ocr_processed = true;
-        photo.ocr_confidence = photo.ocr_confidence || 0;
+        updates.ocr_processed = true;
+        updates.ocr_confidence = photo.ocr_confidence || 0;
       } else {
-        Object.assign(photo, {
-          ocr_confirmed_serial: body.ocr_confirmed_serial ?? photo.ocr_confirmed_serial,
-          is_corrected: body.is_corrected ?? photo.is_corrected,
-          ocr_processed: true,
-        });
+        updates.ocr_confirmed_serial = body.ocr_confirmed_serial ?? photo.ocr_confirmed_serial;
+        updates.is_corrected = body.is_corrected ?? photo.is_corrected;
+        updates.ocr_processed = true;
       }
-      photo.updated_date = now();
+      const updatedRow = await db.updateInspectionPhoto(photo.id, updates);
       await audit('update', 'photo', photo.id, user, 'Updated OCR fields');
-      await saveDb();
-      return send(res, 200, photo);
+      return send(res, 200, updatedRow);
     }
   }
 
   if (segments[1] === 'audit-logs' && method === 'GET') {
     if (!canReadAudit(user)) return error(res, 403, 'Admin or auditor only');
-    return send(res, 200, applyListParams(db.audit_logs, url));
+    return send(res, 200, applyListParams(await getTableRows('audit_logs', user), url));
   }
 
   return error(res, 404, 'API route not found');
@@ -823,8 +790,18 @@ async function router(req, res) {
   }
 }
 
-await loadDb();
-http.createServer(router).listen(PORT, HOST, () => {
-  console.log(`Backend listening on http://${HOST}:${PORT}`);
-  console.log('Seed users: admin@example.com, inspector@example.com, auditor@example.com, shipper@example.com / password123');
-});
+async function start() {
+  try {
+    await db.getPool().query('SELECT 1');
+    console.log('PostgreSQL connected');
+    http.createServer(router).listen(PORT, HOST, () => {
+      console.log(`Backend listening on http://${HOST}:${PORT}`);
+      console.log('Seed users: admin@example.com, inspector@example.com, auditor@example.com, shipper@example.com / password123');
+    });
+  } catch (err) {
+    console.error('Failed to connect to PostgreSQL:', err.message);
+    process.exit(1);
+  }
+}
+
+start();

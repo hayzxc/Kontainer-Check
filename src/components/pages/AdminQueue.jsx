@@ -20,7 +20,7 @@ export default function AdminQueue() {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState('pending');
   const [search, setSearch] = useState('');
-  const [selectedSession, setSelectedSession] = useState(null);
+  const [selectedSessionId, setSelectedSessionId] = useState(null);
   const [actionType, setActionType] = useState(null);
   const [comment, setComment] = useState('');
 
@@ -29,23 +29,26 @@ export default function AdminQueue() {
     queryFn: () => entities.InspectionSession.list('-created_date', 200),
   });
 
+  const selectedSession = sessions.find(s => s.id === selectedSessionId);
+
   const { data: photos = [] } = useQuery({
-    queryKey: ['session-photos-detail', selectedSession?.id],
-    queryFn: () => entities.InspectionPhoto.filter({ session_id: selectedSession.id }),
-    enabled: !!selectedSession,
+    queryKey: ['session-photos-detail', selectedSessionId],
+    queryFn: () => entities.InspectionPhoto.filter({ session_id: selectedSessionId }),
+    enabled: !!selectedSessionId,
   });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, decision, adminComment }) => inspectionSessions.verify(id, decision, adminComment),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['queue-inspections'] });
-      setSelectedSession(null);
+      setSelectedSessionId(null);
       setActionType(null);
       setComment('');
     },
   });
 
   const handleVerify = async (decision) => {
+    if (!selectedSession) return;
     await updateMutation.mutateAsync({
       id: selectedSession.id,
       decision,
@@ -90,7 +93,7 @@ export default function AdminQueue() {
             <Card
               key={session.id}
               className="p-4 cursor-pointer hover:shadow-md transition-all"
-              onClick={() => setSelectedSession(session)}
+              onClick={() => setSelectedSessionId(session.id)}
             >
               <div className="flex items-center justify-between">
                 <div className="flex-1 min-w-0">
@@ -116,7 +119,7 @@ export default function AdminQueue() {
       )}
 
       {/* Detail / Verify Dialog */}
-      <Dialog open={!!selectedSession} onOpenChange={(open) => !open && setSelectedSession(null)}>
+      <Dialog open={!!selectedSessionId} onOpenChange={(open) => !open && setSelectedSessionId(null)}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
           {selectedSession && (
             <>

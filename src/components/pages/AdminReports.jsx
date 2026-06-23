@@ -39,12 +39,23 @@ export default function AdminReports() {
   });
 
   const handleExportCSV = () => {
+    const escapeCSV = (val) => {
+      if (val === null || val === undefined) return '';
+      const str = String(val);
+      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
     const headers = ['Container ID', 'Tipe', 'Lokasi', 'Status', 'OCR Serial', 'Tanggal'];
     const rows = sessions.map(s => [
       s.container_id, s.inspection_type, s.location_name, s.status, s.ocr_serial || '', format(new Date(s.created_date), 'yyyy-MM-dd HH:mm')
     ]);
-    const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
+    const csv = [headers, ...rows]
+      .map(row => row.map(escapeCSV).join(','))
+      .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

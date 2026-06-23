@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+vite-dev.log
+vite-dev.err.log
+Memory-bank/
+.agents
+/agent/
+backend/data/db.json
+*.log

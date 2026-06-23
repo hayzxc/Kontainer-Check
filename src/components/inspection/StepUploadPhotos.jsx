@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/components/ui/use-toast';
 
 const REQUIRED_ANGLES = [
   { key: 'serial', label: 'Foto No Container' },
@@ -18,47 +19,71 @@ const OPTIONAL_ANGLES = [
 
 export default function StepUploadPhotos({ photos, onPhotosChange, uploading, setUploading, onSerialDetected }) {
   const fileRefs = useRef({});
+  const { toast } = useToast();
 
   const scanPhotoForSerial = async (url, angle) => {
     // Mark as scanning
     onPhotosChange(prev => ({ ...prev, [angle]: { ...prev[angle], scanning: true } }));
 
-    const res = await integrations.Core.InvokeLLM({
-      prompt: `Look at this shipping container photo. Extract the container ID/serial number if visible.
+    try {
+      const res = await integrations.Core.InvokeLLM({
+        prompt: `Look at this shipping container photo. Extract the container ID/serial number if visible.
 The format is 4 letters (owner code + equipment category) followed by 6 digits and 1 check digit (e.g. MSCU1234567, TGHU8765432).
 If no container serial number is visible, return an empty string.`,
-      file_urls: [url],
-      response_json_schema: {
-        type: 'object',
-        properties: {
-          detected_serial: { type: 'string', description: 'Detected container serial or empty string' },
-          confidence: { type: 'number', description: 'Confidence 0.0-1.0' },
+        file_urls: [url],
+        response_json_schema: {
+          type: 'object',
+          properties: {
+            detected_serial: { type: 'string', description: 'Detected container serial or empty string' },
+            confidence: { type: 'number', description: 'Confidence 0.0-1.0' },
+          },
         },
-      },
-    });
+      });
 
-    const serial = (res.detected_serial || '').trim().toUpperCase();
-    const confidence = res.confidence || 0;
+      const serial = (res.detected_serial || '').trim().toUpperCase();
+      const confidence = res.confidence || 0;
 
-    onPhotosChange(prev => ({
-      ...prev,
-      [angle]: { ...prev[angle], scanning: false, detected_serial: serial, ocr_confidence: confidence },
-    }));
+      onPhotosChange(prev => ({
+        ...prev,
+        [angle]: { ...prev[angle], scanning: false, detected_serial: serial, ocr_confidence: confidence },
+      }));
 
-    if (serial && confidence > 0.5 && typeof onSerialDetected === 'function') {
-      onSerialDetected(serial, confidence);
+      if (serial && confidence > 0.5 && typeof onSerialDetected === 'function') {
+        onSerialDetected(serial, confidence);
+      }
+    } catch (err) {
+      console.error("Scan error:", err);
+      onPhotosChange(prev => ({
+        ...prev,
+        [angle]: { ...prev[angle], scanning: false },
+      }));
+      toast({
+        title: "Scan Gagal",
+        description: "Gagal memindai nomor seri kontainer menggunakan AI.",
+        variant: "destructive",
+      });
     }
   };
 
   const handleUpload = async (angle, file) => {
     setUploading(angle);
-    const { file_url } = await integrations.Core.UploadFile({ file });
-    const photoData = { url: file_url, file_size_kb: Math.round(file.size / 1024), scanning: false };
-    onPhotosChange(prev => ({ ...prev, [angle]: photoData }));
-    setUploading(null);
-
-    // Auto-scan for serial in background
-    scanPhotoForSerial(file_url, angle);
+    try {
+      const { file_url } = await integrations.Core.UploadFile({ file });
+      const photoData = { url: file_url, file_size_kb: Math.round(file.size / 1024), scanning: false };
+      onPhotosChange(prev => ({ ...prev, [angle]: photoData }));
+      
+      // Auto-scan for serial in background
+      scanPhotoForSerial(file_url, angle);
+    } catch (err) {
+      console.error("Upload error:", err);
+      toast({
+        title: "Upload Gagal",
+        description: "Terjadi kesalahan saat mengunggah foto.",
+        variant: "destructive",
+      });
+    } finally {
+      setUploading(null);
+    }
   };
 
   const handleRemove = (angle) => {

@@ -34,7 +34,7 @@ export default function RoleSelect() {
         // Unknown role - stay on page and show fallback
       }
     }
-  }, [isLoadingAuth, isAuthenticated, user]);
+  }, [isLoadingAuth, isAuthenticated, user, navigate, navigateToLogin]);
 
   if (isLoadingAuth || (isAuthenticated && user && ROLE_MAP[user.role?.toLowerCase()])) {
     return (

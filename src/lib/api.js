@@ -187,7 +187,3 @@ export const integrations = {
     InvokeLLM: invokeLLM,
   },
 };
-
-export function loginWithProvider() {
-  throw new Error('Google sign-in is not available in the independent backend.');
-}
