@@ -1,0 +1,142 @@
+{
+  "name": "InspectionSession",
+  "type": "object",
+  "properties": {
+    "container_id": {
+      "type": "string",
+      "description": "Container ID as printed on the physical container"
+    },
+    "shipper_name": {
+      "type": "string",
+      "description": "Name of the shipper / company"
+    },
+    "inspection_type": {
+      "type": "string",
+      "enum": [
+        "arrival",
+        "departure",
+        "periodic"
+      ],
+      "description": "Type of inspection"
+    },
+    "location_name": {
+      "type": "string",
+      "description": "Name of inspection location"
+    },
+    "latitude": {
+      "type": "number",
+      "description": "GPS latitude"
+    },
+    "longitude": {
+      "type": "number",
+      "description": "GPS longitude"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "pending",
+        "approved",
+        "rejected",
+        "clarification"
+      ],
+      "default": "draft",
+      "description": "Verification status"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Inspector notes"
+    },
+    "verified_by_name": {
+      "type": "string",
+      "description": "Name of admin who verified"
+    },
+    "verified_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Verification timestamp"
+    },
+    "admin_comment": {
+      "type": "string",
+      "description": "Admin comment on rejection/clarification"
+    },
+    "inspector_name": {
+      "type": "string",
+      "description": "Name of the inspector who created this session"
+    },
+    "photo_count": {
+      "type": "number",
+      "default": 0,
+      "description": "Number of photos in this session"
+    },
+    "ocr_serial": {
+      "type": "string",
+      "description": "Confirmed container serial from OCR"
+    },
+    "archived": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether this session has been moved to archive by the inspector"
+    }
+  },
+  "required": [
+    "container_id",
+    "inspection_type",
+    "location_name"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "id": {
+          "$exists": true
+        }
+      }
+    },
+    "read": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": {
+              "$in": [
+                "admin",
+                "auditor"
+              ]
+            }
+          }
+        },
+        {
+          "created_by_id": "{{user.id}}"
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "$and": [
+            {
+              "created_by_id": "{{user.id}}"
+            },
+            {
+              "data.status": {
+                "$in": [
+                  "draft",
+                  "clarification"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

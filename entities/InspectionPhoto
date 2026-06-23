@@ -1,0 +1,131 @@
+{
+  "name": "InspectionPhoto",
+  "type": "object",
+  "properties": {
+    "session_id": {
+      "type": "string",
+      "description": "Reference to InspectionSession ID"
+    },
+    "photo_url": {
+      "type": "string",
+      "description": "URL of the uploaded photo"
+    },
+    "photo_angle": {
+      "type": "string",
+      "enum": [
+        "front",
+        "back",
+        "left",
+        "right",
+        "interior",
+        "serial",
+        "other"
+      ],
+      "description": "Angle/position of the photo"
+    },
+    "file_size_kb": {
+      "type": "number",
+      "description": "File size in KB"
+    },
+    "resolution": {
+      "type": "string",
+      "description": "Image resolution e.g. 1920x1080"
+    },
+    "device_info": {
+      "type": "string",
+      "description": "Device/camera model info"
+    },
+    "ocr_detected_serial": {
+      "type": "string",
+      "description": "Raw OCR-detected serial number"
+    },
+    "ocr_confirmed_serial": {
+      "type": "string",
+      "description": "Inspector-confirmed serial number"
+    },
+    "ocr_confidence": {
+      "type": "number",
+      "description": "OCR confidence score 0.0-1.0"
+    },
+    "damage_labels": {
+      "type": "array",
+      "description": "Detected damage areas with type and confidence",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "ocr_processed": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether OCR has been processed for this photo"
+    },
+    "is_corrected": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether inspector corrected the OCR result"
+    }
+  },
+  "required": [
+    "session_id",
+    "photo_url",
+    "photo_angle"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "id": {
+          "$exists": true
+        }
+      }
+    },
+    "read": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": {
+              "$in": [
+                "admin",
+                "auditor"
+              ]
+            }
+          }
+        },
+        {
+          "created_by_id": "{{user.id}}"
+        }
+      ]
+    },
+    "update": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "created_by_id": "{{user.id}}"
+        }
+      ]
+    },
+    "delete": {
+      "$or": [
+        {
+          "user_condition": {
+            "role": "admin"
+          }
+        },
+        {
+          "created_by_id": "{{user.id}}"
+        }
+      ]
+    }
+  }
+}

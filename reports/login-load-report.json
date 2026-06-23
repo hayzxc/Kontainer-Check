@@ -1,0 +1,29 @@
+{
+  "scenario": "100 simultaneous login requests",
+  "target": "http://127.0.0.1:8789/api/apps/6a262ce8fe5781a4fc436536/auth/login",
+  "started_at": "2026-06-22T03:26:05.012Z",
+  "completed_at": "2026-06-22T03:26:08.423Z",
+  "configuration": {
+    "concurrent_users": 100,
+    "distinct_credentials_supplied": 4,
+    "request_timeout_ms": 10000
+  },
+  "result": {
+    "passed": true,
+    "total_requests": 100,
+    "successful_logins": 100,
+    "failed_logins": 0,
+    "success_rate_percent": 100,
+    "client_start_spread_ms": 126.71,
+    "estimated_test_duration_ms": 3160.86,
+    "latency_ms": {
+      "min": 3034.05,
+      "average": 3047.81,
+      "p50": 3047.66,
+      "p95": 3056.72,
+      "p99": 3058.21,
+      "max": 3093.72
+    },
+    "failures": []
+  }
+}

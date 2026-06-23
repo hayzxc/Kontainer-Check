@@ -1,0 +1,22 @@
+{
+  "name": "Container Verification",
+  "short_name": "ContainerVerify",
+  "description": "Mobile-first container photo inspection and verification platform",
+  "start_url": "/inspector",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F8FAFC",
+  "theme_color": "#1A3C5E",
+  "lang": "id",
+  "categories": ["productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
+}
