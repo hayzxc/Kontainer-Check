@@ -1,7 +1,5 @@
 import React, { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import React, { useRef, useState } from 'react';
-import { Button } from '@/components/ui/button';
 import { FileDown, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
 import jsPDF from 'jspdf';
@@ -117,7 +115,11 @@ function DocumentPreview({ sessions = [], photosMap = {} }) {
                       {Number(session.latitude).toFixed(5)}, {Number(session.longitude).toFixed(5)}
                     </div>
                   ) : (
-        <div style={{ color: '#9ca3af' }}>-</div>
+                    <div style={{ color: '#9ca3af' }}>-</div>
+                  )}
+                </td>
+              </tr>
+            );
           })}
         </tbody>
       </table>
