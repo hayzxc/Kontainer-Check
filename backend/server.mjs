@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { mkdir, writeFile } from 'node:fs/promises';
 import * as db from './db.mjs';
-import { createReadStream } from 'node:fs';
+import { createReadStream, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
@@ -736,7 +736,10 @@ async function router(req, res) {
   const segments = url.pathname.split('/').filter(Boolean);
   res.corsOrigin = getCorsOrigin(req);
 
-  if (url.pathname === '/') return send(res, 200, routeInfo());
+  if (url.pathname === '/') {
+    const indexPath = path.join(rootDir, 'dist', 'index.html');
+    if (!existsSync(indexPath)) return send(res, 200, routeInfo());
+  }
   if (method === 'OPTIONS') return send(res, 204, null);
   if (url.pathname === '/health') return send(res, 200, { ok: true });
   if (url.pathname === '/api' || /^\/api\/apps\/[^/]+\/?$/.test(url.pathname)) {
@@ -783,6 +786,28 @@ async function router(req, res) {
       return send(res, 200, { success: true });
     }
     if (segments[0] === 'api') return handleRestApi(req, res, method, url, segments);
+    
+    // Serve static frontend files
+    if (method === 'GET' && !url.pathname.startsWith('/api') && !url.pathname.startsWith('/uploads')) {
+      let staticPath = path.join(rootDir, 'dist', url.pathname);
+      if (staticPath.endsWith('/') || (existsSync(staticPath) && statSync(staticPath).isDirectory())) {
+        staticPath = path.join(rootDir, 'dist', 'index.html');
+      }
+      if (!existsSync(staticPath)) {
+        staticPath = path.join(rootDir, 'dist', 'index.html');
+      }
+      if (existsSync(staticPath)) {
+        const ext = path.extname(staticPath);
+        const mimes = {
+          '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
+          '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json',
+          '.ico': 'image/x-icon'
+        };
+        res.writeHead(200, { 'Content-Type': mimes[ext] || 'application/octet-stream' });
+        return createReadStream(staticPath).pipe(res);
+      }
+    }
+
     return error(res, 404, 'Route not found');
   } catch (err) {
     console.error(err);

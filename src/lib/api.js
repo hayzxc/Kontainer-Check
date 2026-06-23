@@ -1,5 +1,5 @@
 const APP_ID = import.meta.env.VITE_APP_ID || '6a262ce8fe5781a4fc436536';
-const BASE_URL = import.meta.env.DEV ? '' : (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8789');
+const BASE_URL = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || '';
 const APP_API = `/api/apps/${APP_ID}`;
 
 function authPath(path) {

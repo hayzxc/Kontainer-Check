@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "node backend/server.mjs",
     "dev": "vite",
     "backend": "node backend/server.mjs",
     "dev:full": "node scripts/dev.mjs",
